@@ -1,3 +1,4 @@
+/*Dieser Code implementiert den Eintritt und den Austritt aus dem komplexen Modus in den normalen Modus (langes Drücken der Taste, um sie nach links zu kippen, und Loslassen, um in den komplexen Modus einzutreten, und das Gleiche, um nach unten auszutreten). Migrieren Sie die Funktion des Stillhaltens der Maus bei schnellen Bewegungen in den komplexen Modus*/
 // Setzt die Geschwindigkeitsschwelle für die Gestenerkennung und die Dauer der Geste
 var GESTURE_DETECTION_SPEED = 15; // Geschwindigkeitsschwelle für die Gestenerkennung
 var GESTURE_DURATION = 20; // Dauer der Geste (Einheit: Erkennungszyklen)
