@@ -1,47 +1,48 @@
-// 导入 ble_hid_combo 模块
+
+// Importiert das Modul ble_hid_combo
 var int = require("ble_hid_combo");
 
-// 初始化蓝牙 HID 服务，设置组合模式
+// Initialisiert den Bluetooth-HID-Dienst im Kombinationsmodus
 NRF.setServices(undefined, { hid: int.report });
 
-// 设置手势检测的速度阈值和手势持续时间
+// Legt die Geschwindigkeitsschwelle und Dauer für Gestenerkennung fest
 var GESTURE_DETECTION_SPEED = 15;
 var GESTURE_DURATION = 20;
 var USE_BLE = 1;
 var on = true;
-var complexMode = false; // 复杂模式标志
-var cursorMode = false; // 光标模式标志
-var oldX = 0, oldY = 0; // 上一次加速度值
-var deltaX = 0; // X方向变化量，用于手势检测
+var complexMode = false; // Flag für den komplexen Modus
+var cursorMode = false; // Flag für den Cursor-Modus
+var oldX = 0, oldY = 0; // Vorherige Beschleunigungswerte
+var deltaX = 0; // Änderungsrate in X-Richtung für Gestenerkennung
 
-// 定义基础灵敏度、最小速度和最大速度
+// Definiert Basissensitivität, minimale und maximale Geschwindigkeit
 const baseSensitivity = 3000;
 const minSpeed = 0.01;
 const maxSpeed = 35;
 const sensitivity = 1000;
 
-let detect = 0; // 手势检测计数器
+let detect = 0; // Zähler für Gestenerkennung
 
-// 改进的按键发送函数，模拟按下和释放事件
+// Verbesserte Funktion zum Senden von Tastendruckereignissen
 function sendKeyPress(keyCode) {
   try {
-    int.tapKey(keyCode); // 使用 ble_hid_combo 的 tapKey 方法
-    setTimeout(() => int.tapKey(0), 50); // 延迟释放按键
+    int.tapKey(keyCode); // Nutzt die tapKey-Methode aus ble_hid_combo
+    setTimeout(() => int.tapKey(0), 50); // Verzögerung für Tastenfreigabe
   } catch (error) {
-    console.log("Error sending key press:", error);
+    console.log("Fehler beim Senden eines Tastendrucks:", error);
   }
 }
 
-// 鼠标移动事件处理函数
+// Funktion zur Behandlung von Mausbewegungen
 function moveMouse(dx, dy) {
   try {
-    int.moveMouse(dx, dy); // 使用 ble_hid_combo 的 moveMouse 方法
+    int.moveMouse(dx, dy); // Nutzt die moveMouse-Methode aus ble_hid_combo
   } catch (error) {
-    console.log("Error moving mouse:", error);
+    console.log("Fehler bei der Mausbewegung:", error);
   }
 }
 
-// 复位模式和状态
+// Setzt Modus- und Statusflags zurück
 function resetModes() {
   complexMode = false;
   cursorMode = false;
@@ -49,49 +50,49 @@ function resetModes() {
   oldY = 0;
 }
 
-// 处理加速度计事件的函数，核心逻辑
+// Hauptlogik zur Verarbeitung von Beschleunigungssensordaten
 function onAccel(a) {
-  // 如果按钮被按下，处理模式切换逻辑
+  // Logik zur Modusumschaltung bei gedrücktem Knopf
   if (digitalRead(BTN) === 1) {
     LED3.write(true);
 
-    // 判断模式切换
+    // Bestimmt Modusänderungen
     if (a.acc.x < sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      complexMode = true; // 向左倾斜进入复杂模式
-      cursorMode = false; // 确保退出光标模式
-      console.log("Switched to Complex Mode");
+      complexMode = true; // Neigung nach links aktiviert komplexen Modus
+      cursorMode = false; // Cursor-Modus deaktivieren
+      console.log("Komplexer Modus aktiviert");
     } else if (a.acc.x > sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      cursorMode = true; // 向右倾斜进入光标模式
-      complexMode = false; // 确保退出复杂模式
-      console.log("Switched to Cursor Mode");
+      cursorMode = true; // Neigung nach rechts aktiviert Cursor-Modus
+      complexMode = false; // Komplexer Modus deaktivieren
+      console.log("Cursor-Modus aktiviert");
     } else if (a.acc.y < sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
-      resetModes(); // 向下倾斜退出复杂模式和光标模式
-      console.log("Switched to Normal Mode");
+      resetModes(); // Neigung nach unten deaktiviert alle Modi
+      console.log("Normalmodus aktiviert");
     }
-    return; // 模式切换完成，退出
+    return; // Moduswechsel abgeschlossen, Beenden
   } else {
     LED3.write(false);
   }
 
-  // 光标模式逻辑
+  // Logik für den Cursor-Modus
   if (cursorMode) {
     if (Math.abs(a.acc.x) > sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      sendKeyPress(a.acc.x > 0 ? int.KEY.LEFT : int.KEY.RIGHT); // 左右方向键（保持正确的物理方向）
+      sendKeyPress(a.acc.x > 0 ? int.KEY.LEFT : int.KEY.RIGHT); // Links-/Rechtstasten
     } else if (Math.abs(a.acc.y) > sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
-      sendKeyPress(a.acc.y < 0 ? int.KEY.UP : int.KEY.DOWN); // 上下方向键（保持正确的物理方向）
+      sendKeyPress(a.acc.y < 0 ? int.KEY.UP : int.KEY.DOWN); // Oben-/Untentasten
     }
-    return; // 光标模式下不执行鼠标移动
+    return; // Im Cursor-Modus keine Mausbewegungen
   }
 
-  // 初始化鼠标移动量
+  // Initialisiert Mausbewegungsvariablen
   let x = 0, y = 0;
 
-  // 检查是否接近直立位置（普通模式和复杂模式共用）
+  // Prüft auf annähernd aufrechte Position (Normal- und komplexer Modus)
   if (Math.abs(a.acc.x) < sensitivity && Math.abs(a.acc.y) < sensitivity) {
     x = 0;
     y = 0;
   } else {
-    // 计算倾斜程度并动态调整速度
+    // Berechnet Neigungsgrad und passt Geschwindigkeit dynamisch an
     const tiltX = Math.abs(a.acc.x);
     const tiltY = Math.abs(a.acc.y);
 
@@ -103,19 +104,19 @@ function onAccel(a) {
       ? minSpeed + (tiltY / baseSensitivity) * (tiltY / baseSensitivity) * (maxSpeed - minSpeed)
       : maxSpeed;
 
-    // 修正鼠标移动方向，使得物理方向与控制相符
-    x = a.acc.x > 0 ? -dynamicSpeedX : dynamicSpeedX; // 反转X方向，使物理方向与鼠标移动方向一致
-    y = a.acc.y < 0 ? -dynamicSpeedY : dynamicSpeedY; // 保持Y方向一致
+    // Korrigiert Bewegungsrichtung für konsistente Steuerung
+    x = a.acc.x > 0 ? -dynamicSpeedX : dynamicSpeedX; // X-Richtung invertiert
+    y = a.acc.y < 0 ? -dynamicSpeedY : dynamicSpeedY; // Y-Richtung beibehalten
   }
 
-  // 手势检测逻辑
+  // Logik für Gestenerkennung
   deltaX = Math.abs(x - oldX);
   const deltaY = Math.abs(y - oldY);
   oldX = x;
   oldY = y;
 
   if (complexMode && (deltaX > GESTURE_DETECTION_SPEED || deltaY > GESTURE_DETECTION_SPEED)) {
-    detect = GESTURE_DURATION; // 启用手势检测
+    detect = GESTURE_DURATION; // Aktiviert Gestenerkennung
     LED3.write(true);
   }
 
@@ -124,19 +125,19 @@ function onAccel(a) {
     if (detect == 0) LED3.write(false);
   }
 
-  // 在普通模式和复杂模式下发送鼠标移动数据
+  // Senden von Mausbewegungen im Normal- oder komplexen Modus
   if (on && USE_BLE && detect == 0) {
     if (x !== 0 || y !== 0) moveMouse(x, y);
   }
 }
 
-// 启用加速度计并监听
+// Aktiviert Beschleunigungssensor und überwacht Ereignisse
 Puck.accelOn(26);
 Puck.on('accel', onAccel);
 
-// 启用蓝牙广告
+// Aktiviert Bluetooth-Werbung
 if (USE_BLE) {
   NRF.setAdvertising({}, { name: "Puck.js Joystick" });
 }
 
-console.log('BLEJoystick ready with Enhanced Mode');
+console.log('BLEJoystick bereit im erweiterten Modus');
