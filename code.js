@@ -1,57 +1,100 @@
-/*Dieser Code implementiert den Eintritt und den Austritt aus dem komplexen Modus in den normalen Modus (langes Drücken der Taste, um sie nach links zu kippen, und Loslassen, um in den komplexen Modus einzutreten, und das Gleiche, um nach unten auszutreten). Migrieren Sie die Funktion des Stillhaltens der Maus bei schnellen Bewegungen in den komplexen Modus*/
-// Setzt die Geschwindigkeitsschwelle für die Gestenerkennung und die Dauer der Geste
-var GESTURE_DETECTION_SPEED = 15; // Geschwindigkeitsschwelle für die Gestenerkennung
-var GESTURE_DURATION = 20; // Dauer der Geste (Einheit: Erkennungszyklen)
-var USE_BLE = 1; // Steuerung, ob Bluetooth-Funktion verwendet wird (1 bedeutet aktiviert)
-var on = true; // Initialzustand des Joysticks auf aktiviert setzen
-var complexMode = false; // Komplexer Modus ist anfangs deaktiviert
-var oldX = 0; // Speichert den vorherigen Wert der X-Richtung
-var oldY = 0; // Speichert den vorherigen Wert der Y-Richtung
-var deltaX = 0; // Änderung der X-Richtung
+// 导入 ble_hid_combo 模块
+var int = require("ble_hid_combo");
 
-// Wenn Bluetooth verwendet wird, initialisiere den Bluetooth-HID-Dienst
-if (USE_BLE == 1) {
-  var int = require("ble_hid_combo");
-  NRF.setServices(undefined, { hid: int.report }); // Bluetooth-HID-Dienst einrichten
+// 初始化蓝牙 HID 服务，设置组合模式
+NRF.setServices(undefined, { hid: int.report });
+
+// 设置手势检测的速度阈值和手势持续时间
+var GESTURE_DETECTION_SPEED = 15;
+var GESTURE_DURATION = 20;
+var USE_BLE = 1;
+var on = true;
+var complexMode = false; // 复杂模式标志
+var cursorMode = false; // 光标模式标志
+var oldX = 0, oldY = 0; // 上一次加速度值
+var deltaX = 0; // X方向变化量，用于手势检测
+
+// 定义基础灵敏度、最小速度和最大速度
+const baseSensitivity = 3000;
+const minSpeed = 0.01;
+const maxSpeed = 35;
+const sensitivity = 1000;
+
+let detect = 0; // 手势检测计数器
+
+// 改进的按键发送函数，模拟按下和释放事件
+function sendKeyPress(keyCode) {
+  try {
+    int.tapKey(keyCode); // 使用 ble_hid_combo 的 tapKey 方法
+    setTimeout(() => int.tapKey(0), 50); // 延迟释放按键
+  } catch (error) {
+    console.log("Error sending key press:", error);
+  }
 }
 
-// Definiere Basisempfindlichkeit, minimale Geschwindigkeit und maximale Geschwindigkeit
-const baseSensitivity = 3000; // Basisempfindlichkeit, um den Neigungsgrad zu berechnen
-const minSpeed = 0.01; // Mindestgeschwindigkeit bei geringer Neigung
-const maxSpeed = 35; // Höchstgeschwindigkeit bei großer Neigung
-const sensitivity = 1000; // Empfindlichkeitsschwelle für die Erkennung des Ruhezustands (um festzustellen, ob nahe der Ausgangsposition)
-
-let detect = 0; // Zähler für die Gestenerkennung
-
-// Funktion zur Verarbeitung von Beschleunigungssensordaten
-function onAccel(a) {
-  // Wenn der Button gedrückt wird, Neigungsrichtung bestimmen und entscheiden, ob komplexer Modus aktiviert wird
-  if (digitalRead(BTN) === 1) {
-    LED3.write(true); // LED3 leuchtet, wenn der Button gedrückt wird
-
-    // Bestimme die Neigungsrichtung
-    if (a.acc.x < sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      complexMode = true; // Nach links neigen, um in den komplexen Modus zu wechseln
-    } else if (a.acc.y < sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
-      complexMode = false; // Nach unten neigen, um den komplexen Modus zu verlassen
-    }
-    return;
-  } else {
-    LED3.write(false); // LED3 ausschalten, wenn der Button losgelassen wird
+// 鼠标移动事件处理函数
+function moveMouse(dx, dy) {
+  try {
+    int.moveMouse(dx, dy); // 使用 ble_hid_combo 的 moveMouse 方法
+  } catch (error) {
+    console.log("Error moving mouse:", error);
   }
+}
+
+// 复位模式和状态
+function resetModes() {
+  complexMode = false;
+  cursorMode = false;
+  oldX = 0;
+  oldY = 0;
+}
+
+// 处理加速度计事件的函数，核心逻辑
+function onAccel(a) {
+  // 如果按钮被按下，处理模式切换逻辑
+  if (digitalRead(BTN) === 1) {
+    LED3.write(true);
+
+    // 判断模式切换
+    if (a.acc.x < sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
+      complexMode = true; // 向左倾斜进入复杂模式
+      cursorMode = false; // 确保退出光标模式
+      console.log("Switched to Complex Mode");
+    } else if (a.acc.x > sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
+      cursorMode = true; // 向右倾斜进入光标模式
+      complexMode = false; // 确保退出复杂模式
+      console.log("Switched to Cursor Mode");
+    } else if (a.acc.y < sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
+      resetModes(); // 向下倾斜退出复杂模式和光标模式
+      console.log("Switched to Normal Mode");
+    }
+    return; // 模式切换完成，退出
+  } else {
+    LED3.write(false);
+  }
+
+  // 光标模式逻辑
+  if (cursorMode) {
+    if (Math.abs(a.acc.x) > sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
+      sendKeyPress(a.acc.x > 0 ? int.KEY.LEFT : int.KEY.RIGHT); // 左右方向键（保持正确的物理方向）
+    } else if (Math.abs(a.acc.y) > sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
+      sendKeyPress(a.acc.y < 0 ? int.KEY.UP : int.KEY.DOWN); // 上下方向键（保持正确的物理方向）
+    }
+    return; // 光标模式下不执行鼠标移动
+  }
+
+  // 初始化鼠标移动量
   let x = 0, y = 0;
 
-  // Überprüfe, ob der Joystick nahe an der aufrechten Position ist (Logik zur Rückkehr zur Ausgangsposition)
+  // 检查是否接近直立位置（普通模式和复杂模式共用）
   if (Math.abs(a.acc.x) < sensitivity && Math.abs(a.acc.y) < sensitivity) {
-    // Wenn der Joystick nahe an der aufrechten Position ist, Mausbewegung stoppen
     x = 0;
     y = 0;
   } else {
-    // Bestimme den Neigungsgrad
+    // 计算倾斜程度并动态调整速度
     const tiltX = Math.abs(a.acc.x);
     const tiltY = Math.abs(a.acc.y);
 
-    // Berechne die dynamische Geschwindigkeit basierend auf dem Neigungsgrad
     const dynamicSpeedX = tiltX < baseSensitivity
       ? minSpeed + (tiltX / baseSensitivity) * (tiltX / baseSensitivity) * (maxSpeed - minSpeed)
       : maxSpeed;
@@ -60,63 +103,40 @@ function onAccel(a) {
       ? minSpeed + (tiltY / baseSensitivity) * (tiltY / baseSensitivity) * (maxSpeed - minSpeed)
       : maxSpeed;
 
-    // Setze die Geschwindigkeit basierend auf der Richtung der Beschleunigung
-    if (a.acc.y > 0) y = dynamicSpeedY; // Nach vorne neigen
-    else if (a.acc.y < 0) y = -dynamicSpeedY; // Nach hinten neigen
-    if (a.acc.x > 0) x = -dynamicSpeedX; // Nach links neigen
-    else if (a.acc.x < 0) x = dynamicSpeedX; // Nach rechts neigen
+    // 修正鼠标移动方向，使得物理方向与控制相符
+    x = a.acc.x > 0 ? -dynamicSpeedX : dynamicSpeedX; // 反转X方向，使物理方向与鼠标移动方向一致
+    y = a.acc.y < 0 ? -dynamicSpeedY : dynamicSpeedY; // 保持Y方向一致
   }
 
-  // Berechne die Änderung der X-Richtung für die Gestenerkennung
-  deltaX = Math.abs(x - oldX); // Änderung der X-Richtung berechnen
-  const deltaY = Math.abs(y - oldY); // Änderung der Y-Richtung berechnen
-  oldX = x; // Alten X-Wert aktualisieren
-  oldY = y; // Alten Y-Wert aktualisieren
+  // 手势检测逻辑
+  deltaX = Math.abs(x - oldX);
+  const deltaY = Math.abs(y - oldY);
+  oldX = x;
+  oldY = y;
 
-  // Im komplexen Modus, wenn die Änderungsgeschwindigkeit die Geschwindigkeitsschwelle überschreitet, Gestenerkennung auslösen
   if (complexMode && (deltaX > GESTURE_DETECTION_SPEED || deltaY > GESTURE_DETECTION_SPEED)) {
-    detect = GESTURE_DURATION; // Setze die Dauer der Gestenerkennung
-    LED3.write(true); // LED3 leuchtet, um anzuzeigen, dass eine Geste erkannt wurde
+    detect = GESTURE_DURATION; // 启用手势检测
+    LED3.write(true);
   }
-  // Logik für den Gestenerkennungs-Timer
+
   if (detect > 0) {
-    detect = detect - 1; // Zähler bei jedem Aufruf verringern
-    if (detect == 0) {
-      LED3.write(false); // Timer beendet, LED3 ausschalten
-    }
+    detect--;
+    if (detect == 0) LED3.write(false);
   }
 
-  // Wenn der Joystick aktiviert ist und eine Neigung oder Gestenerkennung aktiv ist, den aktuellen Status ausgeben
-  if (on === true) {
-    if ((x != oldX) || (y != oldY) || (detect != 0)) {
-      console.log("", Math.floor(x), ",", Math.floor(y), ",", detect); // Aktuelle X-, Y- und Gestenzustände ausgeben
-    }
-    oldX = x;
-    oldY = y;
-  }
-
-  // Wenn der Joystick aktiviert ist und die Bluetooth-HID-Funktion aktiviert ist, sende Mausbewegungsdaten
-  if ((on === true) && (USE_BLE == 1)) {
-    try {
-      // Wenn keine Geste aktiv ist, Mausbewegungsdaten senden
-      if (((x != 0) || (y != 0)) && (detect == 0)) {
-        int.moveMouse(x, y); // Maus bewegen
-      }
-    } catch (error) {
-      console.log("Fehler beim Senden des HID-Berichts:", error); // Fehler beim Senden des HID-Berichts abfangen und ausgeben
-    }
+  // 在普通模式和复杂模式下发送鼠标移动数据
+  if (on && USE_BLE && detect == 0) {
+    if (x !== 0 || y !== 0) moveMouse(x, y);
   }
 }
 
-// Beschleunigungssensor aktivieren, Frequenz auf 26Hz setzen (niedrigere Frequenz reduziert den Energieverbrauch)
+// 启用加速度计并监听
 Puck.accelOn(26);
-
-// Auf Beschleunigungssensordaten hören, onAccel Verarbeitungsfunktion aufrufen
 Puck.on('accel', onAccel);
 
-// Bluetooth-Werbung aktivieren, um die Geräteerkennung und Verbindung zu ermöglichen
-if (USE_BLE == 1) {
-  NRF.setAdvertising({}, { name: "Puck.js Joystick" }); // Bluetooth-Gerätenamen einstellen
+// 启用蓝牙广告
+if (USE_BLE) {
+  NRF.setAdvertising({}, { name: "Puck.js Joystick" });
 }
 
-console.log('BLEJoystick bereit (nur Bluetooth)'); // Ausgabe, um anzuzeigen, dass das Programm bereit ist (nur Bluetooth)
+console.log('BLEJoystick ready with Enhanced Mode');
