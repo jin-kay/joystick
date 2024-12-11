@@ -1,48 +1,47 @@
-
-// Importiert das Modul ble_hid_combo
+// Importiert ble_hid_combo-Modul für HID-Funktionalität
 var int = require("ble_hid_combo");
 
-// Initialisiert den Bluetooth-HID-Dienst im Kombinationsmodus
+// Initialisiert den Bluetooth HID-Dienst
 NRF.setServices(undefined, { hid: int.report });
 
-// Legt die Geschwindigkeitsschwelle und Dauer für Gestenerkennung fest
+// Konfiguriert Parameter für Gestenerkennung
 var GESTURE_DETECTION_SPEED = 15;
 var GESTURE_DURATION = 20;
 var USE_BLE = 1;
 var on = true;
-var complexMode = false; // Flag für den komplexen Modus
-var cursorMode = false; // Flag für den Cursor-Modus
-var oldX = 0, oldY = 0; // Vorherige Beschleunigungswerte
-var deltaX = 0; // Änderungsrate in X-Richtung für Gestenerkennung
+var complexMode = false;
+var cursorMode = false;
+var oldX = 0, oldY = 0;
+var deltaX = 0;
 
-// Definiert Basissensitivität, minimale und maximale Geschwindigkeit
+// Empfindlichkeits- und Geschwindigkeitsparameter
 const baseSensitivity = 3000;
 const minSpeed = 0.01;
 const maxSpeed = 35;
 const sensitivity = 1000;
 
-let detect = 0; // Zähler für Gestenerkennung
+let detect = 0;
 
-// Verbesserte Funktion zum Senden von Tastendruckereignissen
+// Sendet Tastendrücke
 function sendKeyPress(keyCode) {
   try {
-    int.tapKey(keyCode); // Nutzt die tapKey-Methode aus ble_hid_combo
-    setTimeout(() => int.tapKey(0), 50); // Verzögerung für Tastenfreigabe
+    int.tapKey(keyCode);
+    setTimeout(() => int.tapKey(0), 50);
   } catch (error) {
     console.log("Fehler beim Senden eines Tastendrucks:", error);
   }
 }
 
-// Funktion zur Behandlung von Mausbewegungen
+// Bewegt die Maus
 function moveMouse(dx, dy) {
   try {
-    int.moveMouse(dx, dy); // Nutzt die moveMouse-Methode aus ble_hid_combo
+    int.moveMouse(dx, dy);
   } catch (error) {
     console.log("Fehler bei der Mausbewegung:", error);
   }
 }
 
-// Setzt Modus- und Statusflags zurück
+// Setzt Modi und Beschleunigungswerte zurück
 function resetModes() {
   complexMode = false;
   cursorMode = false;
@@ -50,94 +49,71 @@ function resetModes() {
   oldY = 0;
 }
 
-// Hauptlogik zur Verarbeitung von Beschleunigungssensordaten
+// Handhabt Ereignisse des Beschleunigungsmessers
 function onAccel(a) {
-  // Logik zur Modusumschaltung bei gedrücktem Knopf
+  // Prüft, ob der Button gedrückt ist und wechselt den Modus
   if (digitalRead(BTN) === 1) {
     LED3.write(true);
-
-    // Bestimmt Modusänderungen
-    if (a.acc.x < sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      complexMode = true; // Neigung nach links aktiviert komplexen Modus
-      cursorMode = false; // Cursor-Modus deaktivieren
-      console.log("Komplexer Modus aktiviert");
+    if (a.acc.x < -sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
+      complexMode = true;
+      cursorMode = false;
     } else if (a.acc.x > sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      cursorMode = true; // Neigung nach rechts aktiviert Cursor-Modus
-      complexMode = false; // Komplexer Modus deaktivieren
-      console.log("Cursor-Modus aktiviert");
+      cursorMode = true;
+      complexMode = false;
     } else if (a.acc.y < sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
-      resetModes(); // Neigung nach unten deaktiviert alle Modi
-      console.log("Normalmodus aktiviert");
+      resetModes();
     }
-    return; // Moduswechsel abgeschlossen, Beenden
+    return;
   } else {
     LED3.write(false);
   }
 
-  // Logik für den Cursor-Modus
-  if (cursorMode) {
+  // Cursor-Modus: Sendet Tastendrücke
+  if (cursorMode && !complexMode && detect == 0) {
     if (Math.abs(a.acc.x) > sensitivity && Math.abs(a.acc.x) > Math.abs(a.acc.y)) {
-      sendKeyPress(a.acc.x > 0 ? int.KEY.LEFT : int.KEY.RIGHT); // Links-/Rechtstasten
+      sendKeyPress(a.acc.x > 0 ? int.KEY.LEFT : int.KEY.RIGHT);
     } else if (Math.abs(a.acc.y) > sensitivity && Math.abs(a.acc.y) > Math.abs(a.acc.x)) {
-      sendKeyPress(a.acc.y < 0 ? int.KEY.UP : int.KEY.DOWN); // Oben-/Untentasten
+      sendKeyPress(a.acc.y < 0 ? int.KEY.UP : int.KEY.DOWN);
     }
-    return; // Im Cursor-Modus keine Mausbewegungen
+    return;
   }
 
-  // Initialisiert Mausbewegungsvariablen
+  // Berechnet Mausbewegungen basierend auf Neigung
   let x = 0, y = 0;
-
-  // Prüft auf annähernd aufrechte Position (Normal- und komplexer Modus)
-  if (Math.abs(a.acc.x) < sensitivity && Math.abs(a.acc.y) < sensitivity) {
-    x = 0;
-    y = 0;
-  } else {
-    // Berechnet Neigungsgrad und passt Geschwindigkeit dynamisch an
+  if (Math.abs(a.acc.x) >= sensitivity || Math.abs(a.acc.y) >= sensitivity) {
     const tiltX = Math.abs(a.acc.x);
     const tiltY = Math.abs(a.acc.y);
-
-    const dynamicSpeedX = tiltX < baseSensitivity
-      ? minSpeed + (tiltX / baseSensitivity) * (tiltX / baseSensitivity) * (maxSpeed - minSpeed)
-      : maxSpeed;
-
-    const dynamicSpeedY = tiltY < baseSensitivity
-      ? minSpeed + (tiltY / baseSensitivity) * (tiltY / baseSensitivity) * (maxSpeed - minSpeed)
-      : maxSpeed;
-
-    // Korrigiert Bewegungsrichtung für konsistente Steuerung
-    x = a.acc.x > 0 ? -dynamicSpeedX : dynamicSpeedX; // X-Richtung invertiert
-    y = a.acc.y < 0 ? -dynamicSpeedY : dynamicSpeedY; // Y-Richtung beibehalten
+    const dynamicSpeedX = tiltX < baseSensitivity ? minSpeed + (tiltX / baseSensitivity) ** 2 * (maxSpeed - minSpeed) : maxSpeed;
+    const dynamicSpeedY = tiltY < baseSensitivity ? minSpeed + (tiltY / baseSensitivity) ** 2 * (maxSpeed - minSpeed) : maxSpeed;
+    x = a.acc.x > 0 ? -dynamicSpeedX : dynamicSpeedX;
+    y = a.acc.y < 0 ? -dynamicSpeedY : dynamicSpeedY;
   }
 
-  // Logik für Gestenerkennung
+  // Gestenerkennung und Cooldown-Logik
   deltaX = Math.abs(x - oldX);
   const deltaY = Math.abs(y - oldY);
   oldX = x;
   oldY = y;
-
   if (complexMode && (deltaX > GESTURE_DETECTION_SPEED || deltaY > GESTURE_DETECTION_SPEED)) {
-    detect = GESTURE_DURATION; // Aktiviert Gestenerkennung
+    detect = GESTURE_DURATION;
     LED3.write(true);
   }
-
   if (detect > 0) {
     detect--;
     if (detect == 0) LED3.write(false);
   }
 
-  // Senden von Mausbewegungen im Normal- oder komplexen Modus
-  if (on && USE_BLE && detect == 0) {
+  // Bewegt die Maus nur in normalen und komplexen Modi
+  if (on && USE_BLE && detect == 0 && !cursorMode) {
     if (x !== 0 || y !== 0) moveMouse(x, y);
   }
 }
 
-// Aktiviert Beschleunigungssensor und überwacht Ereignisse
+// Aktiviert Beschleunigungsmesser und Bluetooth
 Puck.accelOn(26);
 Puck.on('accel', onAccel);
-
-// Aktiviert Bluetooth-Werbung
 if (USE_BLE) {
   NRF.setAdvertising({}, { name: "Puck.js Joystick" });
 }
 
-console.log('BLEJoystick bereit im erweiterten Modus');
+console.log('BLEJoystick bereit');
